@@ -2,6 +2,8 @@ from pprint import pprint
 from copy import deepcopy
 from typing import List
 from loguru import logger
+import re
+import base64
 
 import cv2
 import matplotlib.pyplot as plt
@@ -9,6 +11,16 @@ import numpy as np
 import tensorflow as tf
 
 from core_func import *
+from libcore.easypr.chars_identify import chars_identify
+
+S_CLASSES = ('0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+               'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K',
+               'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
+               'W', 'X', 'Y', 'Z', '川', '鄂', '赣', '甘', '贵',
+               '桂', '黑', '沪', '冀', '津', '京', '吉', '辽',
+               '鲁', '蒙', '闽', '宁', '青', '琼', '陕', '苏',
+               '晋', '皖', '湘', '新', '豫', '渝', '粤', '云',
+               '藏', '浙')
 
 class config:
     debugShowImg = False
@@ -436,7 +448,16 @@ class Plate:
         #     plt.yticks([])
         #     plt.imshow(e,cmap=plt.cm.binary)
         # plt.show()
-        
+        return chars
+    
+    def stringRecognize(self,chars):
+        if chars:
+            plate_license = ""
+            print("start plate")
+            temp = chars_identify.identify(np.array(chars)[..., None], r".\Src\data\chars_20180210T1038\models")
+            for index in temp:
+                plate_license += S_CLASSES[index]
+            return plate_license
 
 class PlateLocate:
 
@@ -641,20 +662,45 @@ class CharsSegment(object):
             outRect.append(vecRect[i])
             count -= 1
 
-def workflow(name):
+def workflow(name,imgdata=None):
     # read img
-    img = cv2.imdecode(np.fromfile(name, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+    if imgdata is None:
+        img = cv2.imdecode(np.fromfile(name, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+    else:
+        img = b64imgToCV2img(imgdata)
     plates:List[Plate] = PlateLocate().mian(img)
-    print(plates)
+    #print(plates)
     
     rl = []
     #res = PlateJudge().judge(plates, r"models/plate_detect")
     for i,plate in enumerate(plates):
         #print("plate",plate.plateImage)
         #cv2.imshow(f"plate{i}", plate.plateImage)
-        #plate.stringSplit()
-        rl.append(plate.plateImage)
+        chars = plate.stringSplit()
+        if not chars:
+            continue
+        res = plate.stringRecognize(chars)
+        rl.append({"plate":CV2imgTob64img(plate.plateImage),"res":res})
+        
     return rl
 
+def b64imgToCV2img(imgdata):
+    result = re.search("data:image/(?P<ext>.*?);base64,(?P<data>.*)", imgdata, re.DOTALL)
+    if result:
+        ext = result.groupdict().get("ext")
+        data = result.groupdict().get("data")
+    else:
+        raise Exception("Do not parse!")
+
+    # 2、base64解码，转换为np数组，转换为opencv输出
+    img_bytes = base64.b64decode(data)
+    nparr = np.fromstring(img_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.COLOR_BGR2RGB)
+    return img
+
+def CV2imgTob64img(img):
+    return "data:image/jpeg;base64,"+ base64.b64encode(cv2.imencode('.jpg', img)[1]).decode()
+
 if __name__ == "__main__":
-    workflow("Imgs/plate_locate.jpg")
+    print(workflow("Imgs/plate_judge.jpg"))
+
